@@ -4,6 +4,62 @@
   
     
     <entry>
+      <title>angr源码分析之CFGFast分析之一</title>
+      <link href="/2020/03/01/angr%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BCFGFast%E5%88%86%E6%9E%90%E4%B9%8B%E4%B8%80/"/>
+      <url>/2020/03/01/angr%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8BCFGFast%E5%88%86%E6%9E%90%E4%B9%8B%E4%B8%80/</url>
+      
+        <content type="html"><![CDATA[<html><head></head><body><h1 id="angr源码分析之CFGFast分析之一"><a href="#angr源码分析之CFGFast分析之一" class="headerlink" title="angr源码分析之CFGFast分析之一"></a>angr源码分析之CFGFast分析之一</h1><h2 id="类的继承关系"><a href="#类的继承关系" class="headerlink" title="类的继承关系"></a>类的继承关系</h2><div class="code-area-wrap"><div class="highlight-tools"><i class="fa fa-angle-down code-expand" aria-hidden="true"></i><div class="copy-notice"></div><i class="fa fa-clipboard" aria-hidden="true"></i></div><figure class="highlight plain"><table><tbody><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">CFGBase: Analysis，CFG分析要继承此类</span><br><span class="line">CFGFast: ForwardAnalysis,CFGBase</span><br><span class="line">Analysis：angr中的分析方法都必须继承此类。</span><br><span class="line">ForwardAnalysis: 提供一个遍历CFG的前向分析框架;如果没有CFG，则用生成CFG的框架生成新的CFG。</span><br></pre></td></tr></tbody></table></figure></div><h2 id="生成CFG的框架-ForwardAnalysis"><a href="#生成CFG的框架-ForwardAnalysis" class="headerlink" title="生成CFG的框架(ForwardAnalysis)"></a>生成CFG的框架(ForwardAnalysis)</h2><h3 id="如何解析"><a href="#如何解析" class="headerlink" title="如何解析"></a>如何解析</h3><p>给一个地址，解析直到跳转即为一个代码块，在框架中为一个个job，代码块就是节点，从一个代码块跳转到另一个代码块构成一条边，最终构成分析程序的<strong>CFG(control flow graph)</strong>。</p><h3 id="解析job的过程收集的信息"><a href="#解析job的过程收集的信息" class="headerlink" title="解析job的过程收集的信息"></a>解析job的过程收集的信息</h3><ol><li>整个程序CFG的信息，其中每个节点都是一个代码块，每个代码块的出口是使流程发生跳转的语句，如jmpxx,call,ret等，这些跳转信息构成了CFG的边。</li><li>各个函数的CFG信息。</li></ol><h3 id="一个job有哪些信息"><a href="#一个job有哪些信息" class="headerlink" title="一个job有哪些信息"></a>一个job有哪些信息</h3><ol><li>表示要接下来要从哪个地址开始分析。</li><li>分析的地址属于哪个函数。</li><li>哪个节点产生了这个job。</li><li>这个job与哪些函数边有关。</li></ol><h3 id="有两种job队列"><a href="#有两种job队列" class="headerlink" title="有两种job队列"></a>有两种job队列</h3><ol><li>通过正常跳转(call jmpxx)生成的job。</li><li>从某个函数返回的地址生成pendding job，只有正常的用完了，才会用pending job中的job。</li></ol><h3 id="分析过程中有哪些难点"><a href="#分析过程中有哪些难点" class="headerlink" title="分析过程中有哪些难点"></a>分析过程中有哪些难点</h3><p>主要就是跳转的目的地址的解析</p><div class="code-area-wrap"><div class="highlight-tools"><i class="fa fa-angle-down code-expand" aria-hidden="true"></i><div class="copy-notice"></div><i class="fa fa-clipboard" aria-hidden="true"></i></div><figure class="highlight plain"><table><tbody><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">1. call/jmpxx eax </span><br><span class="line">2. call/jmpxx [mem+eax*0x4]</span><br><span class="line">3. call/jmpxx [mem]</span><br></pre></td></tr></tbody></table></figure></div><p>在angr中这些类型的跳转成为间接跳转，需要额外的解析，如IAT解析，或使用符号执行以及程序切片去解析这些间接跳转地址。</p><h3 id="分析框架"><a href="#分析框架" class="headerlink" title="分析框架"></a>分析框架</h3><div class="code-area-wrap"><div class="highlight-tools"><i class="fa fa-angle-down code-expand" aria-hidden="true"></i><div class="copy-notice"></div><i class="fa fa-clipboard" aria-hidden="true"></i></div><figure class="highlight plain"><table><tbody><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">1. _analyze</span><br><span class="line">    a. _pre_analysis</span><br><span class="line">    b. _analysis_core_baremetal(这是一个循环，从job队列中获取job，分析生成新的job，直到job队列为空)</span><br><span class="line">        1) _pre_job_handling(抽象接口，CFGFast实现)</span><br><span class="line">        2) _process_job_and_get_successors(输入当前job)</span><br><span class="line">            a) _get_successors (抽象接口,CFGFast实现,处理一个job，得到successors)</span><br><span class="line">            对于每一个successor调用</span><br><span class="line">                i) _handle_successor(抽象接口,输出job)</span><br><span class="line">                ii) _insert_job(输入job，将job放入job队列中)</span><br><span class="line">            c) _post_job_handling(抽象接口)</span><br><span class="line">        3) _intra_analysis(抽象接口)</span><br></pre></td></tr></tbody></table></figure></div><h2 id="CFGFast的实现"><a href="#CFGFast的实现" class="headerlink" title="CFGFast的实现"></a>CFGFast的实现</h2><pre><code>a.  _get_successors(输入job，返回新产生的jobs)    i. _scan_block        1) _scan_irsb            a) _generate_cfgnode(生成CFGNode，一个代码块就是一个节点)                i) 用factory.block生成一个vex block代码块                ii) 提取irsb                iii) 生成CFGNode            b)  apply_function_edges(为这个job相关的函数CFG添加边)            c) _graph_add_edge(为整个CFG添加边，需要有源节点(通过job得知)，目的节点，以及跳转类型)            d) _function_add_node            e) _create_jobs(输入出口跳转地址,跳转类型)                i) 如果跳转的地址不是具体值                    a). 如果是ret,为当前函数添加一个出口，设置当前函数能返回，设置当前节点为已经返回                    b). 这是一个间接跳转，尝试解析这个地址，如果能解析                        1). 如果跳转为call,调用_create_job_call                         2). 如果跳转不是call,创建FunctionTransitionEdge，表示这是函数中的一个转移边，创建job，返回                ii) 如果是具体值                    a). 如果跳转类型为call,调用_create_job_call                     b). 如果不是call，创建FunctionTransitionEdge，表示这是函数中的一个转移边，创建job，返回1. _create_job_call    a. 如果跳转目的地址不是空        i. 创建functioncalledge，表示这是函数中的一个调用边        ii. 创建job，添加job。        iii. 获取callee函数，即跳转地址代表的函数            1) 如果没有，将caller的下一个指令设为返回地址，添加functionfakeretedge，添加job到pending队列中，也就是解析caller的下一指令            2) 如果有，且不能返回，则退出，如能返回,将caller的下一个指令设为返回地址，添加functionfakeretedge，添加job到pending队列中                </code></pre></body></html>]]></content>
+      
+      
+      <categories>
+          
+          <category> static program analysis </category>
+          
+          <category> control flow graph </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> angr </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
+      <title>angr源码分析之中间语言VEX</title>
+      <link href="/2020/03/01/angr%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8B%E4%B8%AD%E9%97%B4%E8%AF%AD%E8%A8%80vex/"/>
+      <url>/2020/03/01/angr%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90%E4%B9%8B%E4%B8%AD%E9%97%B4%E8%AF%AD%E8%A8%80vex/</url>
+      
+        <content type="html"><![CDATA[<html><head></head><body><h1 id="angr源码分析之中间语言VEX"><a href="#angr源码分析之中间语言VEX" class="headerlink" title="angr源码分析之中间语言VEX"></a>angr源码分析之中间语言VEX</h1><h2 id="什么是中间语言"><a href="#什么是中间语言" class="headerlink" title="什么是中间语言"></a>什么是中间语言</h2><blockquote><p>二进制代码 –> 汇编代码 –> 中间语言  </p></blockquote><p>这是与具体的底层架构无关的中间语言</p><ol><li>用偏移表示寄存器，可以映射到真正的底层架构中</li><li>无指令副作用，如一些pop，push操作还更改了esp的值，该指令由副作用，在指令的运行过程中改变了其他值的内容，在vex中指令是无副作用的</li><li>vex引入了临时变量，用于存储内存、寄存器值</li></ol><h2 id="例子"><a href="#例子" class="headerlink" title="例子"></a>例子</h2><h3 id="x86代码"><a href="#x86代码" class="headerlink" title="x86代码"></a>x86代码</h3><div class="code-area-wrap"><div class="highlight-tools"><i class="fa fa-angle-down code-expand" aria-hidden="true"></i><div class="copy-notice"></div><i class="fa fa-clipboard" aria-hidden="true"></i></div><figure class="highlight plain"><table><tbody><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">0042f225 66  83  7a       CMP        word ptr [EDX  + 0x6 ],0x1f</span><br><span class="line">         06  1f</span><br><span class="line">0042f22a 77  14           JA         0x0042f420</span><br></pre></td></tr></tbody></table></figure></div><h3 id="VEX代码"><a href="#VEX代码" class="headerlink" title="VEX代码"></a>VEX代码</h3><div class="code-area-wrap"><div class="highlight-tools"><i class="fa fa-angle-down code-expand" aria-hidden="true"></i><div class="copy-notice"></div><i class="fa fa-clipboard" aria-hidden="true"></i></div><figure class="highlight plain"><table><tbody><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">00 | ------ IMark(0x42f225, 5, 0) ------</span><br><span class="line">01 | t5 = GET:I32(edx)</span><br><span class="line">02 | t4 = Add32(t5,0x00000006)</span><br><span class="line">03 | t2 = LDle:I16(t4)</span><br><span class="line">04 | PUT(cc_op) = 0x00000005</span><br><span class="line">05 | t6 = 16Uto32(t2)</span><br><span class="line">06 | PUT(cc_dep1) = t6</span><br><span class="line">07 | PUT(cc_dep2) = 0x0000001f</span><br><span class="line">08 | PUT(cc_ndep) = 0x00000000</span><br><span class="line">09 | PUT(eip) = 0x0042f22a</span><br><span class="line">10 | ------ IMark(0x42f22a, 2, 0) ------</span><br><span class="line">11 | t13 = x86g_calculate_condition(0x00000006,0x00000005,t6,0x0000001f,0x00000000):Ity_I32</span><br><span class="line">12 | t8 = 32to1(t13)</span><br><span class="line">13 | if (t8) { PUT(eip) = 0x42f22c; Ijk_Boring }</span><br><span class="line">NEXT: PUT(eip) = 0x0042f240; Ijk_Boring</span><br></pre></td></tr></tbody></table></figure></div><h2 id="读操作"><a href="#读操作" class="headerlink" title="读操作"></a>读操作</h2><p>• RdTmp(t10) 读临时变量<br>• GET:I32(16) 读寄存器<br>• LDIe:I32 读内存</p><h2 id="写操作"><a href="#写操作" class="headerlink" title="写操作"></a>写操作</h2><p>• WrTmp 写临时变量<br>• Put 写寄存器<br>• Stle 写内存</p><h2 id="运算操作"><a href="#运算操作" class="headerlink" title="运算操作"></a>运算操作</h2><p>如add sub等，都是在临时变量之间运算</p><h2 id="IR-expression"><a href="#IR-expression" class="headerlink" title="IR expression"></a>IR expression</h2><p>如读操作，常量，if else then,运算操作</p><h2 id="IR-statement"><a href="#IR-statement" class="headerlink" title="IR statement"></a>IR statement</h2><p>等号左边表示IR statement的操作类型<br>如，条件跳转<br>WrTmp(t1) = (IR Expression) </p><h2 id="IRSB-代码块"><a href="#IRSB-代码块" class="headerlink" title="IRSB(代码块)"></a>IRSB(代码块)</h2><p>最后的指令是某种形式的跳转,一定是PUT(eip)<br>一般为以下两种形式</p><ol><li>WrTmp(tmp )=(IR expression) PUT(eip)=tmp</li><li>PUT(reg)=(IR expression) PUT(eip)=reg</li></ol></body></html>]]></content>
+      
+      
+      <categories>
+          
+          <category> static program analysis </category>
+          
+          <category> IR </category>
+          
+      </categories>
+      
+      
+        <tags>
+            
+            <tag> angr </tag>
+            
+            <tag> vex </tag>
+            
+        </tags>
+      
+    </entry>
+    
+    
+    
+    <entry>
       <title>什么是AST?</title>
       <link href="/2020/02/25/%E4%BB%80%E4%B9%88%E6%98%AFAST/"/>
       <url>/2020/02/25/%E4%BB%80%E4%B9%88%E6%98%AFAST/</url>
@@ -85,7 +141,7 @@
       
         <tags>
             
-            <tag> x64dbg, </tag>
+            <tag> x64dbg </tag>
             
             <tag> FastStone Capture </tag>
             
